@@ -7,7 +7,7 @@ Scan a target URL for common links, open ports, services and vulnerabilities. Us
 
 <h3>How does it work?</h3>
 <pre>It looks for OS and version information for software such as apache/nginx
-Then it crawls on each page for all links including ```<form>``` actions and ```<a>``` hrefs
+Then it crawls on each page for all links including &lt;form&gt; actions and &lt;a&gt;hrefs
 Next it looks for common directories such as /phpmyadmin /cpanel /wp-admin etc
 After this it sees what ports are open and tests if FTP and SSH connections are able to be made
 Finally it writes everything to a report.html page so the user has a good idea of how the site is layed out.</pre>
