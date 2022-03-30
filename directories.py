@@ -5,7 +5,7 @@ import datetime
 from urllib.parse import urlparse
 import webbrowser
 import os
-from requests_html import HTMLSession
+#from requests_html import HTMLSession
 from bs4 import BeautifulSoup
 import socket
 import paramiko
