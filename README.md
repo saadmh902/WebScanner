@@ -2,6 +2,7 @@
 Scan a target URL for common links, open ports, services and vulnerabilities. Used for simple info gathering
 <h1>Web Scanner</h1>
 <img src="https://i.imgur.com/6vsLJVV.gif" width="400" />
+<img src="https://i.imgur.com/HRxSddv.png" width="400" />
 <h3>What is it used for?</h3>
 <p>This scans a website for common files that might be left behind by the developer</p>
 
