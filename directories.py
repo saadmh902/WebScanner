@@ -1,3 +1,4 @@
+from colorama import Fore, Back, Style,init
 import requests
 import time
 from datetime import date
@@ -11,16 +12,15 @@ import socket
 import paramiko
 import ftplib
 from lxml.etree import ParserError
-from colorama import Fore, Back, Style
 import random
 import json
 
 #####################################################################
-#																	#
-#	Written by Saad M 												#
-#	Please excuse the messy code this is my first proper project	#
-#						👉👈										#
-#																	#
+#																																		#
+#	Written by Saad M 																								#
+#	Please excuse the messy code this is my first proper project			#
+#						👉👈																										#
+#																																		#
 #####################################################################
 
 # DISCLAIMER : Only use this tool for servers you have explicit permission to test on!
@@ -38,7 +38,7 @@ def cuteTable(*args):#Usage cuteTable(("Text",4),("sample,6)) (Text to input and
 
 
 
-def UserAgent():
+def generateUserAgent():
 	f = open("payload/user_agents.txt", "r")
 	data = json.load(f)
 	randomBrowser = random.choice(["chrome","opera","firefox","internetexplorer","safari"])
@@ -53,7 +53,7 @@ def DoesFormActionExist(item,goodItems):#Avoid duplicate form actions
 			break
 	return result
 
-def getErrorPage(url,cookie):#Use this function to check against all further requests to make sure <200> pages aren't actually <404>
+def getErrorPage(url,cookies):#Use this function to check against all further requests to make sure <200> pages aren't actually <404>
 	randomChars = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
 	randomChars += ["0","1","2","3","4","5","6","7","8","9"]
 	i = 0
@@ -66,7 +66,7 @@ def getErrorPage(url,cookie):#Use this function to check against all further req
 		i+=1
 	#randomString += ".php"
 	print("Fetching 404 page with GET:" + randomString)
-	r = requests.get(url + randomString)
+	r = requests.get(url + randomString,cookies=cookies)
 	return r.content
 
 
@@ -289,7 +289,8 @@ def getWebServerInfo(url,response,goodItems,cookies,serverInfo):#This is used on
 def scanRobots(url,goodItems,cookies,headers):
 	print("Scanning robots file for new items\t\t\t\t\t")
 	blacklist = ["User-agent","Crawl-delay"]#Ignore populating from this list
-	response = requests.get(url + "robots.txt",cookies,headers=headers)
+	response = requests.get(url + "robots.txt",cookies=cookies,headers=headers)
+	robotsFound = []
 	for line in response.iter_lines(): #Use instead of text to get each line from .txt
 		try:
 			line = str(line)
@@ -307,7 +308,7 @@ def scanRobots(url,goodItems,cookies,headers):
 			goodItems.append(information)
 		except:continue
 
-	print("Scanning robots completed!\t\t\t\t\t\t")
+	print("Scanning robots completed! ({} URLs found)\t\t\t\t\t\t".format(len(robotsFound)))
 
 def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapsed): #Show successful items and save data to report
 
@@ -521,10 +522,17 @@ def scanDirectories(url,cookie,search_level):
 		cookies = {'': ''}
 	else:
 		cookies = {'PHPSESSID': ''}#Change to get from a cookiefile
+	session = requests.Session()
+	print(url)
+	response = session.get(url)
+	retrievedCookie = session.cookies.get_dict()
+	cookies = retrievedCookie
+	print(str(retrievedCookie) + " retrieved as cookie.")
+
 	#end cookies
 
 
-	ua = UserAgent()
+	ua = generateUserAgent()
 	print("Generated Random User Agent: "+ ua)
 	headers = {
     'User-Agent': ua,
@@ -599,7 +607,7 @@ def scanDirectories(url,cookie,search_level):
 				for line in lines:
 					commonFiles.directories.extend([line])
 
-
+		filesFound = []
 		for mainCount,line in enumerate(commonFiles.files):
 			for count,extensions in enumerate(commonFiles.extensions):
 
@@ -607,7 +615,7 @@ def scanDirectories(url,cookie,search_level):
 				print("Checking for file: '" + page + "' (" + str(mainCount) + "/" + str((len(commonFiles.files) * len(commonFiles.extensions))+ 1) +")\t\t\t\t\t\t" ,end='\r')
 				time.sleep(timerDelay)
 				try:
-					response = requests.get(url + page,cookies,headers=headers)
+					response = requests.get(url + page,cookies,headers=headers,cookies=retrievedCookie)
 					if((response.status_code >= 100 and response.status_code <= 399) or response.status_code == 403 or response.status_code == 406): ##If the file exists then save it
 						code = response.status_code
 						if(response.history == []):
@@ -626,6 +634,7 @@ def scanDirectories(url,cookie,search_level):
 							scanRobots(url,goodItems,cookies,headers)
 						if(response.content != errorPage): #If the request doesnt match the 404 page then continue 
 							goodItems.append(information)
+							filesFound.append(1)
 							getServices(page,response,goodItems,cookies,serverInfo,servicesFound)#Check if this page give service info e.g. phpmyadmin wordpress etc
 						else:
 							print("404",end="\r")
@@ -646,14 +655,15 @@ def scanDirectories(url,cookie,search_level):
 					goodItems.append(information)
 					continue
 
-		print("Scanning Files Completed!\t\t\t\t\t\t")
+		print("Scanning Files Completed! ({} files)\t\t\t\t\t\t".format(len(filesFound)))
 
 		#Scan common directories
+		directoriesFound = []
 		for count,line in enumerate(commonFiles.directories):
 			print("Checking for directory: '" + line + "' (" + str(count) + "/" + str(len(commonFiles.directories) + 1) +")\t\t\t\t\t" ,end='\r')
 			#time.sleep(0.5)
 			try:
-				response = requests.get(url + line,cookies,headers=headers)
+				response = requests.get(url + line,cookies=retrievedCookie,headers=headers)
 				#print(line + "\t\t\t" + str(response.status_code))
 				#time.sleep(0.5)
 				if((response.status_code >= 100 and response.status_code <= 399) or response.status_code == 403):
@@ -662,6 +672,7 @@ def scanDirectories(url,cookie,search_level):
 					information = (line,code,itemType)
 					if(response.content != errorPage): #If the request doesnt match the 404 page then continue 
 						goodItems.append(information)
+						directoriesFound.append(1)
 						getServices(url+line,response,goodItems,cookies,serverInfo,servicesFound)
 					else:
 						print("404",end="\r")
@@ -672,7 +683,7 @@ def scanDirectories(url,cookie,search_level):
 				continue
 
 
-		print("Scanning Directories Completed!\t\t\t\t")
+		print("Scanning Directory Completed! ({} directories)\t\t\t\t\t\t".format(len(directoriesFound)))
 		saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,start)
 
 		#End searching through common files
