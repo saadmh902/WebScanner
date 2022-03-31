@@ -42,7 +42,7 @@ def generateUserAgent():
 	f = open("payload/user_agents.txt", "r")
 	data = json.load(f)
 	randomBrowser = random.choice(["chrome","opera","firefox","internetexplorer","safari"])
-	browser = data["browsers"][randomBrowser][random.randint(0,50)]
+	browser = data["browsers"][randomBrowser][random.randint(0,49)]
 	return browser
 
 def DoesFormActionExist(item,goodItems):#Avoid duplicate form actions
@@ -53,7 +53,7 @@ def DoesFormActionExist(item,goodItems):#Avoid duplicate form actions
 			break
 	return result
 
-def getErrorPage(url,cookies):#Use this function to check against all further requests to make sure <200> pages aren't actually <404>
+def getErrorPage(url,cookies,session):#Use this function to check against all further requests to make sure <200> pages aren't actually <404>
 	randomChars = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
 	randomChars += ["0","1","2","3","4","5","6","7","8","9"]
 	i = 0
@@ -66,7 +66,7 @@ def getErrorPage(url,cookies):#Use this function to check against all further re
 		i+=1
 	#randomString += ".php"
 	print("Fetching 404 page with GET:" + randomString)
-	r = requests.get(url + randomString,cookies=cookies)
+	r = session.get(url + randomString)
 	return r.content
 
 
@@ -286,10 +286,10 @@ def getWebServerInfo(url,response,goodItems,cookies,serverInfo):#This is used on
 			serverInfo.append(information)	
 			print("[ALERT]: Retrieved Server Information: ("+line.decode_contents() + ") this information was found on "+url)	
 
-def scanRobots(url,goodItems,cookies,headers):
+def scanRobots(url,goodItems,cookies,headers,session):
 	print("Scanning robots file for new items\t\t\t\t\t")
 	blacklist = ["User-agent","Crawl-delay"]#Ignore populating from this list
-	response = requests.get(url + "robots.txt",cookies=cookies,headers=headers)
+	response = session.get(url + "robots.txt",headers=headers)
 	robotsFound = []
 	for line in response.iter_lines(): #Use instead of text to get each line from .txt
 		try:
@@ -453,7 +453,7 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				print("Please choose Y or N.")
 		input("Press ENTER to continue.")
 		print("\n\n\n\n")
-def lookForLinks(baseurl,url,response,cookie,goodItems,headers): #This function opens successful files and looks for links
+def lookForLinks(baseurl,url,response,cookie,goodItems,headers,session): #This function opens successful files and looks for links
 	soup = BeautifulSoup(response.content,"lxml")
 	links = soup.find_all("a")
 	links.extend(soup.find_all("link"))
@@ -465,7 +465,7 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,headers): #This function 
 	links.extend(soup.find_all("area"))
 
 	#FETCH LINKS
-	def addElementAttribute(line,goodItems,url,attribute): #addElementAttribute(<ELEMENT>,goodItems,url,href/src)
+	def addElementAttribute(line,goodItems,url,attribute,session): #addElementAttribute(<ELEMENT>,goodItems,url,href/src)
 		if(line.get(attribute) != None):
 			line = line.get(attribute)
 			my_hostname = urlparse(url)
@@ -498,11 +498,11 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,headers): #This function 
 					goodItems.append(information)
 					print("Grabbing all links from: '"+url+"'\t\t\t\t\t", end="\r")
 	for line in links: #Fetches hrefs
-		addElementAttribute(line,goodItems,url,"src")
-		addElementAttribute(line,goodItems,url,"href")
+		addElementAttribute(line,goodItems,url,"src",session)
+		addElementAttribute(line,goodItems,url,"href",session)
 
 	#FETCH ACTIONS
-	r = requests.get(url,headers=headers)#Fetches actions
+	r = session.get(url,headers=headers)#Fetches actions
 	parser = BeautifulSoup(r.content, 'html.parser')#Get form actions
 	forms = [f.get('action') for f in parser.find_all('form')]
 	for actionLine in forms:
@@ -523,7 +523,6 @@ def scanDirectories(url,cookie,search_level):
 	else:
 		cookies = {'PHPSESSID': ''}#Change to get from a cookiefile
 	session = requests.Session()
-	print(url)
 	response = session.get(url)
 	retrievedCookie = session.cookies.get_dict()
 	cookies = retrievedCookie
@@ -544,7 +543,7 @@ def scanDirectories(url,cookie,search_level):
 	servicesFound = []
 	portsOpen = []
 
-	errorPage = getErrorPage(url,cookies)
+	errorPage = getErrorPage(url,cookies,session)
 
 	class commonFiles(): #Class for all files to search through
 
@@ -578,10 +577,10 @@ def scanDirectories(url,cookie,search_level):
 		wordpress = ["wp-content/uploads/wpo-plugins-tables-list.json"] #wordpress files
 
 
-	print("Beginning scan of " + url)
+	print("Attempting to make connection to " + url)
 	start = time.time()
 	try:
-		baseresponse = requests.get(url,cookies,headers=headers)
+		baseresponse = session.get(url,headers=headers)
 	except requests.exceptions.InvalidSchema:
 		print("Failed to connect, URL invalid")
 		return
@@ -615,7 +614,7 @@ def scanDirectories(url,cookie,search_level):
 				print("Checking for file: '" + page + "' (" + str(mainCount) + "/" + str((len(commonFiles.files) * len(commonFiles.extensions))+ 1) +")\t\t\t\t\t\t" ,end='\r')
 				time.sleep(timerDelay)
 				try:
-					response = requests.get(url + page,cookies,headers=headers,cookies=retrievedCookie)
+					response = session.get(url + page,headers=headers)
 					if((response.status_code >= 100 and response.status_code <= 399) or response.status_code == 403 or response.status_code == 406): ##If the file exists then save it
 						code = response.status_code
 						if(response.history == []):
@@ -629,9 +628,9 @@ def scanDirectories(url,cookie,search_level):
 						if(len(serverInfo) == 0 and response.content != errorPage):#If serverinfo wasnt already grabbed, collect info
 							getWebServerInfo(url+page,response,goodItems,cookies,serverInfo)
 						if(code == 200):#The page is good, now check it for any other links
-							lookForLinks(url,url+page,response,cookie,goodItems,headers)
+							lookForLinks(url,url+page,response,cookie,goodItems,headers,session)
 						if(page == "robots.txt" and response.content != errorPage): ##If robots.txt is good then scan the robots doc
-							scanRobots(url,goodItems,cookies,headers)
+							scanRobots(url,goodItems,cookies,headers,session)
 						if(response.content != errorPage): #If the request doesnt match the 404 page then continue 
 							goodItems.append(information)
 							filesFound.append(1)
@@ -663,7 +662,7 @@ def scanDirectories(url,cookie,search_level):
 			print("Checking for directory: '" + line + "' (" + str(count) + "/" + str(len(commonFiles.directories) + 1) +")\t\t\t\t\t" ,end='\r')
 			#time.sleep(0.5)
 			try:
-				response = requests.get(url + line,cookies=retrievedCookie,headers=headers)
+				response = session.get(url + line,headers=headers)
 				#print(line + "\t\t\t" + str(response.status_code))
 				#time.sleep(0.5)
 				if((response.status_code >= 100 and response.status_code <= 399) or response.status_code == 403):
