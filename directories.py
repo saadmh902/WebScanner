@@ -645,7 +645,7 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				href = str(list[0]) #http://localhost/ instead of http://localhost/localhost/index.php
 			myfile.write("<tr><td><a class='"+tdClass+"' href='"+href +"'> " + str(list[0]) + "</a></td><td>" + str(list[1]) + "</td><td>" + str(list[2]) + "</td></tr>")
 		myfile.write("</table>")
-f
+
 		print("Services found:")#Iterate throguh servicesFound and display them
 		for list in servicesFound:
 			print(str(list[0]))
