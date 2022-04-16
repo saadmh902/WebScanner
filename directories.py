@@ -17,6 +17,9 @@ from lxml.etree import ParserError
 import random
 import json
 from difflib import SequenceMatcher
+
+
+
 def windowTitle(title):
   print("\033]2;{}\007".format(title),end="\r")
 
@@ -40,6 +43,8 @@ def similar(a, b):
 def containsExtension(page,extensionsList):
 	for ext in extensionsList:
 		if(ext in page and ext != ""):
+			return True
+		elif(page[0] == "."):
 			return True
 	return False 
 
@@ -80,10 +85,18 @@ def generateUserAgent():
 	browser = data["browsers"][randomBrowser][random.randint(0,49)]
 	return browser
 
+def DoesVulnLinkExist(item,goodItems):#Avoid duplicate form actions
+	result = False
+	for line in goodItems:
+		if(item == line[0] and "vuln" in line[2].lower()):
+			result = True
+			break
+	return result
+
 def DoesFormActionExist(item,goodItems):#Avoid duplicate form actions
 	result = False
 	for line in goodItems:
-		if(item == line[0] and line[2] == "FORM ACTION"):
+		if(item == line[0] and "FORM ACTION" in line[2]):
 			result = True
 			break
 	return result
@@ -132,8 +145,6 @@ def warningMessage():
 	return "[" + setColor("WARNING","yellow") + "]: "
 
 def checkForFTP(url,search_level):#Check if FTP connections can be made
-	#if ("000webhost.com" in url):
-	#	url = url.replace("000webhost.com","000webhostapp.com",1)
 	ip = parseHostName(url)
 	if(ip == False):
 		return
@@ -332,7 +343,7 @@ def checkForWAF(url,servicesFound,errorPage):
 	print(infoMessage()+ "WAF Check Complete.")
 	return
 	#print(servicesFound)
-def checkForSSH(url):#Check if SSh connections can be made
+def checkForSSH(url,search_level):#Check if SSh connections can be made
 
 	ip = parseHostName(url)
 	if(ip == False):
@@ -348,6 +359,15 @@ def checkForSSH(url):#Check if SSh connections can be made
 	loginDictionary.append(info)
 	info = ("adminstrator","adminstrator")
 	loginDictionary.append(info)
+	if(search_level == 1):
+		with open("payload/common_ssh.txt") as file:
+			lines = file.read().splitlines()
+			for line in lines:
+				z = line.split(":")
+				username = z[0]
+				password = z[1]
+				info = (username,password)
+				loginDictionary.append(info)
 	attempts=0
 	for line in loginDictionary:
 		attempts+=1
@@ -356,19 +376,12 @@ def checkForSSH(url):#Check if SSh connections can be made
 			username = line[0]
 			password = line[1]
 			port = "22"
-			#print("Auth as "+ip+ ":"+port+" "+username+":"+password+"\t\t\t")
-			#username = "root"
-			#password = "root"
-			#print("Attempting to make an SSH connection to {} @ {}:{}".format(ip,username,password), end="\r")
-
 			client = paramiko.client.SSHClient()
 			client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 			client.connect(host, port=port,username=username, password=password)
 			_stdin, _stdout,_stderr = client.exec_command("help")
-			#print(_stdout.read().decode())
-			#print("It looks like SSH access was made!")
+
 			print(alertMessage()+"SSH Access granted using user '" + username + "' and pass '"+password+" ({}/{})'\t\t".format(attempts,len(loginDictionary)),end="\r")
-			#To do Add user and pass to report.html
 			client.close()
 			auth_connection.append("True")
 		except paramiko.ssh_exception.AuthenticationException:
@@ -384,6 +397,9 @@ def checkForSSH(url):#Check if SSh connections can be made
 			continue
 		except TimeoutError:
 			flushLine(warningMessage()+"SSH Connection Timeout as {} @ {}:{} ({}/{})\t\t".format(ip,username,password,attempts,len(loginDictionary)))
+			continue
+		except Exception as e:
+			print(e)
 			continue
 	clearLineAbove()
 	#print(auth_connection)
@@ -593,7 +609,7 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				information = ("SFTP","No Connection")
 				servicesFound.append(information)
 
-			sshInfo = checkForSSH(url)
+			sshInfo = checkForSSH(url,0)
 			if(sshInfo == "ConnectionNoAuth"):
 				information = ("SSH","Active")
 				servicesFound.append(information)
@@ -630,9 +646,9 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 	try:
 		host = urlToTLD(url)
 		ipInfo = socket.gethostbyname(host)
-		information = ("IP Address",ipInfo)
-		servicesFound.append(information)
 		print("IP Resolved as {}".format(ipInfo))
+		information = ("IP Address","<a href='http://ip-api.com/line/{}'>{}</a>".format(ipInfo,ipInfo))
+		servicesFound.append(information)
 	except Exception as e:
 		print("Could not get IP from {}".format(host))
 	endTime = endTime + endServiceTime
@@ -658,7 +674,7 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 	.coolBlue:visited{
 		color: #1c77d1;
 	}
-.orange { color:orange; } .green { color:green; } .blue { color:blue; } .grey { color:grey; } html { font-family:Arial; } 
+.orange { color:orange; } .green { color:green; } .blue { color:blue; } .grey { color:grey; } .pink {color :pink;} html { font-family:Arial; } 
 	.foundItems {
 		margin-top:10px;
 		width: auto;
@@ -738,7 +754,7 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				printcode = str(list[1])
 				cuteTable((printinfo,75),(printcode,10))
 
-			if("External" in list[2]):
+			if("External" in list[2] or "FORM ACTION" == list[2]):
 				href = str(list[0])
 			else:
 				href = url + str(list[0]) #Absolute path
@@ -752,9 +768,11 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				tdClass = "coolBlue"#used to be blue
 			elif("REDIRECT" in list[2]):
 				tdClass = "grey"
+			elif("vuln" in list[2].lower()):
+				tdClass = "pink"
 			else:
 				tdClass = "coolBlue"
-			if(list[2] == "Internal HyperLink"):
+			if(list[2] == "Internal HyperLink" or "vuln" in list[2].lower()):
 				href = str(list[0]) #http://localhost/ instead of http://localhost/localhost/index.php
 			myfile.write("""
 <tr>
@@ -817,21 +835,20 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				print("Please choose Y or N.")
 		input("Press ENTER to continue.")
 		print("\n\n\n\n")
-def lookForLinks(baseurl,url,response,cookie,goodItems,headers,session): #This function opens successful files and looks for links
-	soup = BeautifulSoup(response.content,"lxml")
-	links = soup.find_all("a")
-	links.extend(soup.find_all("link"))
-	links.extend(soup.find_all("script"))
-	links.extend(soup.find_all("meta"))
-	links.extend(soup.find_all("img"))
-	links.extend(soup.find_all("li"))
-	links.extend(soup.find_all("base"))
-	links.extend(soup.find_all("area"))
 
-	#FETCH LINKS
+def lookForLinks(baseurl,url,response,cookie,goodItems,errorItems,headers,session): #This function opens successful files and looks for links
 	def addElementAttribute(line,goodItems,url,attribute,session): #addElementAttribute(<ELEMENT>,goodItems,url,href/src)
 		if(line.get(attribute) != None):
 			line = line.get(attribute)
+
+			vulnInfo = isURLVuln(baseurl+line,session,headers)
+			if(vulnInfo[0] == True and DoesVulnLinkExist(baseurl+line,goodItems) == False):
+				information = (baseurl+line,"200","Vulnerable Link")
+				goodItems.append(information)
+				print(alertMessage()+"Potential vulnerable hyperlink found! ('{}' in {})\n".format(setColor(vulnInfo[1],'yellow'),url))
+			else:
+				information = (baseurl+line,"200","Link not vulnerable")
+				errorItems.append(information)
 			my_hostname = urlparse(url)
 			my_hostname ='{uri.netloc}'.format(uri=my_hostname)
 			check_hostname = urlparse(line)
@@ -862,23 +879,130 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,headers,session): #This f
 				if(doesFileExist == False):
 					goodItems.append(information)
 					print("Grabbing all links from: '"+url+"'\t\t\t\t\t", end="\r")
+
+############################################################################
+
+	soup = BeautifulSoup(response.content,"lxml")
+	links = soup.find_all("a")
+	links.extend(soup.find_all("link"))
+	links.extend(soup.find_all("script"))
+	links.extend(soup.find_all("meta"))
+	links.extend(soup.find_all("img"))
+	links.extend(soup.find_all("li"))
+	links.extend(soup.find_all("base"))
+	links.extend(soup.find_all("area"))
+
+	#FETCH LINKS
+	
 	for line in links: #Fetches hrefs
 		addElementAttribute(line,goodItems,url,"src",session)
 		addElementAttribute(line,goodItems,url,"href",session)
 
+
+
+
 	#FETCH ACTIONS
 	r = session.get(url,headers=headers)#Fetches actions
 	parser = BeautifulSoup(r.content, 'html.parser')#Get form actions
-	forms = [f.get('action') for f in parser.find_all('form')]
-	for actionLine in forms:
-		if actionLine == None:
-			actionLine = "No URL"
-		if(DoesFormActionExist(actionLine,goodItems) == False):
+	#forms = [f.get('action') for f in parser.find_all('form')]
+	for f in parser.find_all('form'):#Find all forms and construct a get request based off of all of the inputs
+		action = f.get("action")
+		method = f.get("method")
+		children = f.find_all("input")
+		#children = f.findChildren("input" , recursive=False)
+		#print("action {} method {} ".format(action,method))
+		#print(children)
+		params = ""
+		for count,child in enumerate(children):
+			if(count == 0):
+				try:
+					params += "?"+child.get("name")+"="
+				except:continue#Probably no name attribute
+			else:
+				try:
+					params+="&"+child.get("name")+"="
+				except:continue#Probably no name attribute
+
+		#print("\nparams " + params+"\n")
+
+		if action == None:
+			actionLine = url #If there is no action="" attribute then just use the URL of this current page
+		else:
+			actionLine = action
+		#print(actionLine + " action")
+		#print(params + "params")
+		newURL = actionLine + params
+		if(url not in actionLine):
+			newURL = baseurl+newURL
+		if(DoesFormActionExist(newURL,goodItems) == False):
 			#print("'"+actionLine+"' <form> action found\t",end="\r")
-			information = (actionLine,"200","FORM ACTION")
-			goodItems.append(information)
+			vulnForm = isFormActionVuln(newURL,headers,session)
+			if(vulnForm[0] == True):#Check if form action is vuln 
+				print(alertMessage()+ "{} was found to be potentially vulnerable to SQL injection! ('{}' found)".format(url,setColor(vulnForm[1],"yellow")))
+				information = (newURL,"200","FORM ACTION")
+				goodItems.append(information)
+			else:
+				information = (newURL,"200","FORM ACTION [Vulnerable]")
+				goodItems.append(information)			
+
+def isURLVuln(url,session,headers):
+
+	try:
+		stripUrl = url.split("?")
+		oldUrl = stripUrl[0]
+	except Exception as e:
+		print(e)
+		return False
+	try:
+		stripUrl = stripUrl[1].split("&")
+	except:pass
+	try:
+		payload = "'"
+		newparams = ""
+		for line in stripUrl:
+			newparams += "{}{}".format(line,payload)
+		testUrl = oldUrl +"?" +newparams
+		r = session.get(testUrl,headers=headers)
+		with open("payload/mysql_errors.txt") as file:
+			lines = file.read().splitlines()
+			for line in lines:
+				if(line in r.text):#SQL Error was found in page 
+					return (True,line,url)
+			return (False,"","") #No SQL errors found in page
+	except Exception as e:
+		print(e)
+		#print("error")
+		return (False,"","")
 
 
+def isFormActionVuln(url,headers,session):#Opens URL (from a form action found while crawling) then checks for php and sql errors by manipulating get params
+	try:
+		stripUrl = url.split("?")
+		oldUrl = stripUrl[0]
+	except:
+		print("Error")
+	try:
+		stripUrl = stripUrl[1].split("&")
+	except:
+		print("Error")
+	try:
+		payload = "'"
+		newparams = ""
+		for line in stripUrl:
+			newparams += "{}{}".format(line,payload)
+		testUrl = oldUrl +"?" +newparams
+		r = session.get(testUrl,headers=headers)
+		with open("payload/mysql_errors.txt") as file:
+			lines = file.read().splitlines()
+			for line in lines:
+				if(line in r.text):#SQL Error was found in page 
+					return (True,line,url)
+			return (True,"",url)
+	except Exception as e:
+
+		print(e)
+		#print("error")
+		return (True,"",url)
 	
 
 def scanDirectories(url,cookie,search_level):
@@ -969,7 +1093,7 @@ def scanDirectories(url,cookie,search_level):
 		files.extend(["home","notice","default","install","app","functions","sql","mysql","search"]) #General files
 		files.extend(["oldindex","test","testadf","testasdf","testasf","t","f","abc","123","1234","abcd","new"]) #Files sometimes left behind devs
 		files.extend(["dev","development","testing"]) # more development files
-		#files.extend(["wp-admin","phpmyadmin","cpanel"])
+		files.extend(["wp-admin","phpmyadmin","cpanel"])
 		independantFiles = [".htaccess",".htpasswd"]
 		#Extensions to be appended to each files[]
 		extensions = [".html",".php",".htm",".shtml",".txt",".ico",".css",".js",""]
@@ -1073,7 +1197,7 @@ def scanDirectories(url,cookie,search_level):
 					getWebServerInfoFromHttp(response,serverInfo)
 					getWebServerInfo(url+page,response,goodItems,cookies,serverInfo)#Run web server either way, it will add unique items
 					if(code == 200):#The page is good, now check it for any other links
-						lookForLinks(url,url+page,response,cookie,goodItems,headers,session)
+						lookForLinks(url,url+page,response,cookie,goodItems,errorItems,headers,session)
 					if(page == "robots.txt"): ##If robots.txt is good then scan the robots doc
 						scanRobots(url,goodItems,cookies,headers,session)
 
@@ -1139,7 +1263,7 @@ def scanDirectories(url,cookie,search_level):
 					###FIX THIS###
 					timerDelay += 1
 					print(setColor("E: Failed to connect, increasing time delay to " + str(timerDelay) + " seconds","grey"))
-					#print(e)
+					print(e)
 					code = "Error"
 					itemType = "File"
 					information = (page,e,itemType)
