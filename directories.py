@@ -9,7 +9,7 @@ import os,sys
 #from requests_html import HTMLSession
 import bs4
 from bs4 import BeautifulSoup
-
+import re
 import socket
 import paramiko
 import ftplib
@@ -85,10 +85,48 @@ def generateUserAgent():
 	browser = data["browsers"][randomBrowser][random.randint(0,49)]
 	return browser
 
+def bingCrawl(url,goodItems,headers):
+	url = parseHostName(url)
+	url = "site:"+url
+	bingLink = ('http://www.bing.com/search?q={}'.format(url))
+	#print(bingLink)
+	try:	
+		response = requests.get(bingLink,headers=headers)
+	except Exception as e:
+		print('Error get bing.com')
+		print(e)
+	req = ''	
+	try:
+			#soup = BeautifulSoup(response.content.decode(),"lxml")
+			#link = soup.find_all("a")
+			link = re.findall('<h2><a href="(.+?)"', response.text, re.DOTALL)
+			z = []
+			for i in range(len(link)):
+				z.append(link[i])
+				print(link[i])
+				information = (link[i],"N/A","Search Engine Link")
+				exists = False
+				for counter, goodItem in enumerate(goodItems):	
+					if(goodItem[0] == link[i]):
+						exists = True
+						break
+				if(exists == False):
+					goodItems.append(information)
+
+			if(z!=[]):
+				print(infoMessage()+"Search engine returned {} results".format(len(z)))
+	except Exception as e:
+		print('Error parsing url')
+		print(e)
 def DoesVulnLinkExist(item,goodItems):#Avoid duplicate form actions
 	result = False
+	item = item.split("?")
+	item = item[0]
 	for line in goodItems:
-		if(item == line[0] and "vuln" in line[2].lower()):
+		if(item in line[0]):
+		#if(item == line[0] and "vuln" in line[2].lower()):
+			#print("{} in {} BALLS".format(item,line[0]))
+			#input()
 			result = True
 			break
 	return result
@@ -101,7 +139,7 @@ def DoesFormActionExist(item,goodItems):#Avoid duplicate form actions
 			break
 	return result
 
-def getErrorPage(url,cookies,session,type):#Use this function to check against all further requests to make sure <200> pages aren't actually <404>
+def getErrorPage(url,cookies,session,type,goodItems):#Use this function to check against all further requests to make sure <200> pages aren't actually <404>
 	randomChars = ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"]
 	randomChars += ["0","1","2","3","4","5","6","7","8","9"]
 	i = 0
@@ -121,8 +159,21 @@ def getErrorPage(url,cookies,session,type):#Use this function to check against a
 	#randomString += ".php"
 	#print(setColor("Fetching 404 page with GET:" + randomString,"grey"))
 	r = session.get(url + randomString)
+	try:
+		checkResponseForSQL(url+randomString,r,goodItems)
+	except:
+		print("Couldn't check for SQL errors")
 	return {"content":r.content,"payload":randomString}
 
+def checkResponseForSQL(url,response,goodItems):
+	#Check if page has sql errors, if it does check if vuln was added to goodItems, if not add it to good items
+	with open("payload/mysql_errors.txt") as file:
+		sqlerrors = file.read().splitlines()
+		for sqlerror in sqlerrors:
+			if(sqlerror in response.text):#SQL Error was found in page 
+				flushLine(alertMessage()+"SQL Error '{}' was found on page {}".format(setColor(sqlerror,"yellow"),url))
+				informationVuln = (url,response.status_code,"Vulnerable File <small class='vuln'>{}</small>".format(sqlerror))
+				goodItems.append(informationVuln)
 
 def setColor(text,color):
 	if(color == "green"):
@@ -235,7 +286,7 @@ def checkForFTP(url,search_level):#Check if FTP connections can be made
 	#To do  add to report
 
 
-def parseHostName(url):
+def parseHostName(url):# http://google.com/ -> google.com
 	ip = urlparse(url)
 	ip ='{uri.netloc}'.format(uri=ip)#Get hostname from URL, will fail if its an IP
 	if(ip[0:4] == "www."):
@@ -304,7 +355,7 @@ def checkForSFTP(url):
 
 def checkHeadersWAF(response):
 	try:
-		items = ["Sucuri/Cloudproxy","Sucuri","Cloudproxy","CloudFlare","Mod_Security"]
+		items = ["Sucuri/Cloudproxy","Sucuri","Cloudproxy","CloudFlare","Mod_Security","Kona Site Defender","Akamai"]
 		for item in items:
 			if(item in response.header["Server"]):
 				return item
@@ -319,20 +370,23 @@ def checkForWAF(url,servicesFound,errorPage):
 	payload = url+vector
 	s = requests.get(payload)#Use requests instead of session since we're trying to get a WAF reaction
 	#s = session.get(payload)
-	html_page = s.content.decode().lower()
+	try:
+		html_page = s.content.decode().lower()
+	except:
+		html_page = s.content.lower()
 
-	wafList = ["Mod_Security","CloudFlare","wp-defender"]#List of WAFs 
+	wafList = ["Mod_Security","CloudFlare","wp-defender","Kona Site Defender","Akamai"]#List of WAFs 
 	for wafItem in wafList:	
 		wafItem = str(wafItem)
 		wafItemNeedle = wafItem.lower()
 		#print("found")
-		if(wafItemNeedle in html_page):#removed and html_page != errorPage.lower()
-			print(alertMessage()+"WAF '"+wafItem + "' detected.")
-			information = (wafItem,payload)
-			servicesFound.append(information)
-			#print("added")
-
-
+		try:
+			if(wafItemNeedle in html_page):#removed and html_page != errorPage.lower()
+				print(alertMessage()+"WAF '"+wafItem + "' detected.")
+				information = (wafItem,payload)
+				servicesFound.append(information)
+				#print("added")
+		except:continue
 
 	#Check for string in HTTP header
 	r = requests.get(url)
@@ -668,6 +722,13 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 
 		myfile.write('''
 <style>
+	.vuln{
+		background-color:black;
+		font-size:50%;
+		color:yellow;
+		border-radius:5px;
+		padding:2px;
+	}
 	.coolBlue{
 		color: #1c77d1;
 	}
@@ -768,12 +829,14 @@ def saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,timeElapse
 				tdClass = "coolBlue"#used to be blue
 			elif("REDIRECT" in list[2]):
 				tdClass = "grey"
-			elif("vuln" in list[2].lower()):
-				tdClass = "pink"
 			else:
 				tdClass = "coolBlue"
-			if(list[2] == "Internal HyperLink" or "vuln" in list[2].lower()):
+			if(list[2] == "Internal HyperLink"):
 				href = str(list[0]) #http://localhost/ instead of http://localhost/localhost/index.php
+			if("vuln" in list[2].lower()):
+				tdClass = "pink"
+			if(list[0][:4] == "http"):
+				href = str(list[0])
 			myfile.write("""
 <tr>
 	<td><a class='"""+tdClass+"' href='"+href +"'> " + str(list[0]) + "</a>"""
@@ -841,14 +904,22 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,errorItems,headers,sessio
 		if(line.get(attribute) != None):
 			line = line.get(attribute)
 
-			vulnInfo = isURLVuln(baseurl+line,session,headers)
-			if(vulnInfo[0] == True and DoesVulnLinkExist(baseurl+line,goodItems) == False):
-				information = (baseurl+line,"200","Vulnerable Link")
-				goodItems.append(information)
-				print(alertMessage()+"Potential vulnerable hyperlink found! ('{}' in {})\n".format(setColor(vulnInfo[1],'yellow'),url))
+			if("http" == line[:4]):
+				checkUrl = line
+			elif("//" == line[:2]):
+				checkUrl = "http:"+line
 			else:
-				information = (baseurl+line,"200","Link not vulnerable")
-				errorItems.append(information)
+				checkUrl = baseurl + line
+			if(DoesVulnLinkExist(checkUrl,goodItems) == False and "?" in line):#Only check if links are vuln if ? paramater is in link and vuln link doesnt already exist in gooditems
+				vulnInfo = isURLVuln(checkUrl,session,headers)
+				if(vulnInfo[0] == True):
+					information = (checkUrl,"200","Vulnerable Link <small class='vuln'>{}</small>".format(vulnInfo[1]))
+					goodItems.append(information)
+					print(alertMessage()+"Potential vulnerable hyperlink found! ('{}' in {})".format(setColor(vulnInfo[1],'yellow'),line))
+				else:
+					information = (checkUrl,"200","Link not vulnerable")
+					errorItems.append(information)
+			#Else vuln link already existed e.g. cat.php?id=1 cat.php?id=2 skipped
 			my_hostname = urlparse(url)
 			my_hostname ='{uri.netloc}'.format(uri=my_hostname)
 			check_hostname = urlparse(line)
@@ -857,7 +928,7 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,errorItems,headers,sessio
 			if((my_hostname in check_hostname) or check_hostname == ""):
 			#if(my_hostname in check_hostname or my_hostname == ""):#if line hosttname and URL hostname are same then append, e.g. http://localhost/index.php => http://localhost/post.php = Good http
 				#print("'"+line+"' hyperlink found\t\t\t\t\t\t",end="\r")
-				information = (baseurl+line,"N/A","Internal HyperLink")
+				information = (checkUrl,"N/A","Internal HyperLink")
 				#Check if information already exists in goodItems
 				doesFileExist = False
 				for counter,item in enumerate(goodItems):
@@ -867,7 +938,7 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,errorItems,headers,sessio
 						break
 				if(doesFileExist == False):
 					goodItems.append(information)
-					print("Grabbing all links from: '"+url+"'\t\t\t\t\t", end="\r")
+					print("Grabbing all links from: '"+url+"'...\t\t\t\t\t", end="\r")
 			else:
 				information = (line,"N/A","External HyperLink")
 				doesFileExist = False
@@ -878,7 +949,7 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,errorItems,headers,sessio
 						break
 				if(doesFileExist == False):
 					goodItems.append(information)
-					print("Grabbing all links from: '"+url+"'\t\t\t\t\t", end="\r")
+					print("Grabbing all links from: '"+url+"'...\t\t\t\t\t", end="\r")
 
 ############################################################################
 
@@ -939,10 +1010,11 @@ def lookForLinks(baseurl,url,response,cookie,goodItems,errorItems,headers,sessio
 			vulnForm = isFormActionVuln(newURL,headers,session)
 			if(vulnForm[0] == True):#Check if form action is vuln 
 				print(alertMessage()+ "{} was found to be potentially vulnerable to SQL injection! ('{}' found)".format(url,setColor(vulnForm[1],"yellow")))
-				information = (newURL,"200","FORM ACTION")
+				information = (newURL,"200","FORM ACTION [Vulnerable]")
+				#information = (newURL,"200","FORM ACTION")
 				goodItems.append(information)
 			else:
-				information = (newURL,"200","FORM ACTION [Vulnerable]")
+				information = (newURL,"200","FORM ACTION")
 				goodItems.append(information)			
 
 def isURLVuln(url,session,headers):
@@ -968,6 +1040,12 @@ def isURLVuln(url,session,headers):
 			for line in lines:
 				if(line in r.text):#SQL Error was found in page 
 					return (True,line,url)
+				else:
+					soup = BeautifulSoup(r.text, 'lxml').text
+					soup = soup.replace(" ","")
+					soup = soup.replace("\n","")
+					if(soup == ""):
+						return (True,"Empty Response",url)
 			return (False,"","") #No SQL errors found in page
 	except Exception as e:
 		print(e)
@@ -979,12 +1057,10 @@ def isFormActionVuln(url,headers,session):#Opens URL (from a form action found w
 	try:
 		stripUrl = url.split("?")
 		oldUrl = stripUrl[0]
-	except:
-		print("Error")
+	except:pass
 	try:
 		stripUrl = stripUrl[1].split("&")
-	except:
-		print("Error")
+	except:pass
 	try:
 		payload = "'"
 		newparams = ""
@@ -997,12 +1073,18 @@ def isFormActionVuln(url,headers,session):#Opens URL (from a form action found w
 			for line in lines:
 				if(line in r.text):#SQL Error was found in page 
 					return (True,line,url)
-			return (True,"",url)
+				else:#If not sql errors are found see if the page TEXT is empty (not content)
+					soup = BeautifulSoup(r.text, 'lxml').text
+					soup = soup.replace(" ","")
+					soup = soup.replace("\n","")
+					if(soup == ""):
+						return (True,"Empty Response",url)
+			return (False,"",url)
 	except Exception as e:
 
 		print(e)
 		#print("error")
-		return (True,"",url)
+		return (False,"",url)
 	
 
 def scanDirectories(url,cookie,search_level):
@@ -1054,23 +1136,41 @@ def scanDirectories(url,cookie,search_level):
 	servicesFound = []
 	portsOpen = []
 
+
 	#Some websites display different error pages for folder/ or file.txt
+	errorPagePayload = ""
+	errorPage = ""
+	errorPagePayload = ""
+
+	errorPageInf = ""
+	errorPageDir = ""
+	errorPagePayloadDir = ""
 	for i in range(1,4):
 		try:
-			errorPageInf = getErrorPage(url,cookies,session,"file")
-			errorPage = errorPageInf["content"].decode()
+			errorPageInf = getErrorPage(url,cookies,session,"file",goodItems)
+			try:
+				errorPage = errorPageInf["content"].decode()
+			except:
+				errorPage = errorPageInf["content"]
 			errorPagePayload = errorPageInf["payload"]
 			break
-		except:
-			print("Could not retrieved 404 page trying again.")
+		except Exception as e:
+			print(e)
+			print("Could not retrieve 404 page trying again. ({}/3)".format(i),end="\r")
 	for i in range (1,4):
 		try:			
-			errorPageInf = getErrorPage(url,cookies,session,"directory")
-			errorPageDir = errorPageInf["content"].decode()
+			errorPageInf = getErrorPage(url,cookies,session,"directory",goodItems)
+			try:
+				errorPage = errorPageInf["content"].decode()
+			except:
+				errorPage = errorPageInf["content"]
 			errorPagePayloadDir = errorPageInf["payload"]
 		except:
-			print("Could not retrieved 404 page trying again.")
-	print(setColor("Fetching 404 page with GET: " + errorPagePayload,"grey"))
+			print("Could not retrieve 404 page trying again. ({}/3)".format(i),end="\r")
+	if(errorPagePayload != ""):
+		print(setColor("Fetching 404 page with GET: " + errorPagePayload,"grey"))
+	else:
+		print(failureMessage()+ setColor("Couldn't get 404 page.","grey"))
 
 	class commonFiles(): #Class for all files to search through
 
@@ -1089,6 +1189,7 @@ def scanDirectories(url,cookie,search_level):
 		files.extend(["gallery","photo","imag"]) #Gallerys
 		files.extend(["js","java","javascript"])#JavaScript files/directories
 		files.extend(["error","time","sync","async"])#General files
+		files.extend(["forgot","forgot_pass","forgot_password","resetpass","reset_pass","reset_password","reset"])
 
 		files.extend(["home","notice","default","install","app","functions","sql","mysql","search"]) #General files
 		files.extend(["oldindex","test","testadf","testasdf","testasf","t","f","abc","123","1234","abcd","new"]) #Files sometimes left behind devs
@@ -1145,7 +1246,7 @@ def scanDirectories(url,cookie,search_level):
 				for line in lines:
 					commonFiles.directories.extend([line])
 
-		checkDictionary = []
+		checkDictionary = []#Targets to be run through for loop
 		#Populates scan targets
 		for filePrefix in commonFiles.files:
 			for fileSuffix in commonFiles.extensions:
@@ -1211,10 +1312,20 @@ def scanDirectories(url,cookie,search_level):
 						switchErrorPage = errorPage
 						switchErrorPagePayload = errorPagePayload							
 
-					switchErrorPage = switchErrorPage.replace(switchErrorPagePayload,"")
-					respCheck = response.content.decode()
+					try:
+						switchErrorPage = switchErrorPage.replace(switchErrorPagePayload,"")
+					except:pass
+					try:
+						respCheck = response.content.decode()
+					except:
+						#print(response.content)
+						#input()
+						respCheck = response.text
 					respCheck = respCheck.replace(page,"")
 
+
+
+		
 					#Only add page to goodItems if its atleast 95% diffrent than the errorPage.txt and errorPage/ strings
 					if(similar(respCheck,errorPage) < 0.95 and similar(respCheck,errorPageDir) < 0.95 and code != 404): #If the request doesnt match the 404 page then continue 
 						#print("Stats on page: {} ErrorPage %: {} ErrorPageDir %: {} Type: {}".format(page,similar(respCheck,errorPage), similar(respCheck,errorPageDir),itemType))
@@ -1227,6 +1338,9 @@ def scanDirectories(url,cookie,search_level):
 						#f = open("page.txt","w")
 						#f.write(respCheck)
 						#f.close()
+											#Check if page has sql errors, if it does check if vuln was added to goodItems, if not add it to good items
+						checkResponseForSQL(line,response,goodItems)
+
 						goodItems.append(information)
 						if("File" in itemType):
 							filesFound.append(1)
@@ -1262,8 +1376,11 @@ def scanDirectories(url,cookie,search_level):
 				except Exception as e:
 					###FIX THIS###
 					timerDelay += 1
-					print(setColor("E: Failed to connect, increasing time delay to " + str(timerDelay) + " seconds","grey"))
+					print(setColor("E: Failed to connect {}, increasing time delay to {} seconds".format(url+page,timerDelay),"grey"))
 					print(e)
+					exc_type, exc_obj, exc_tb = sys.exc_info()
+					fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+					print(exc_type, fname, exc_tb.tb_lineno)
 					code = "Error"
 					itemType = "File"
 					information = (page,e,itemType)
@@ -1271,6 +1388,7 @@ def scanDirectories(url,cookie,search_level):
 					continue
 
 		print("Scan Completed! ({} files and {} directories)\t\t\t\t\t\t".format(len(filesFound), len(directoriesFound)))
+		bingCrawl(url,goodItems,headers)#Crawl bing.com for URl and add items
 		saveAndShowItems(url,goodItems,serverInfo,servicesFound,portsOpen,start,errorPage,errorItems,errorPagePayload)#Write info to report and sort data
 
 		#End searching through common files
